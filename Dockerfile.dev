@@ -1,0 +1,49 @@
+# Stage 1 - Generate our recipe file for dependencies.
+FROM rust as planner
+WORKDIR /app
+RUN cargo install cargo-chef
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+# Stage 2 - Build our dependencies.
+FROM rust as cacher
+WORKDIR /app
+RUN cargo install cargo-chef
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+
+# Stage 3 - Install cargo-watch and build the app
+FROM rust as dev_builder
+WORKDIR /app
+
+# Install cargo-watch for hot-reloading
+RUN cargo install cargo-watch
+
+# Create appUser.
+ENV USER=web
+ENV UID=1001
+
+RUN adduser \
+    --disabled-password \
+    --gecos "" \
+    --home "/nonexistent" \
+    --shell /sbin/nologin \
+    --no-create-home \
+    --uid ${UID} \
+    ${USER}
+
+# Copy local code to the container image.
+COPY . .
+
+# copy the cached dependencies
+COPY --from=cacher /app/target target
+COPY --from=cacher /usr/local/cargo /usr/local/cargo
+
+# Set the working directory.
+WORKDIR /app
+
+# Expose the port your application listens on
+EXPOSE 8080
+
+# Start the development server with hot-reloading enabled
+CMD ["cargo", "watch", "-x", "run"]
